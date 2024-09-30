@@ -1,0 +1,113 @@
+---
+- name: Docker Installation
+  become: true
+  hosts: slave
+  remote_user: ubuntu 
+  tasks:
+  - name: Install packages
+    ansible.builtin.apt:
+      update_cache: true
+      name:
+        - ca-certificates 
+        - curl 
+        - gnupg 
+        - lsb-release 
+        - apt-transport-https 
+        - git 
+        - wget
+        - software-properties-common
+    become: true
+    become_method: sudo
+
+  - name: Create keyrings directory 
+    ansible.builtin.file:
+      path: /etc/apt/keyrings
+      state: directory
+      mode: '0755'
+    become: true
+    become_method: sudo
+
+  - name: Check Docker on System 
+    ansible.builtin.command:
+      cmd: docker --version
+    register: docker_check
+    ignore_errors: true
+    
+  - name: Debug 
+    ansible.builtin.debug:
+      msg: "{{ docker_check }}"
+  
+  - name: Get docker gpg key 
+    ansible.builtin.apt_key:
+      url: https://download.docker.com/linux/ubuntu/gpg
+      keyring: /etc/apt/keyrings/docker.gpg
+      state: present
+    become: true
+    become_method: sudo
+    when: docker_check is failed
+    
+  - name: Get Architecture
+    ansible.builtin.shell: dpkg --print-architecture
+    register: system_arch
+
+  - name: Add docker repo 
+    ansible.builtin.apt_repository:
+      repo: > 
+        deb [arch={{system_arch.stdout}} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_facts['lsb']['codename'] }} stable
+      filename: docker
+      state: present
+    become: true
+    become_method: sudo
+    when: docker_check is failed
+
+  - name: Install Docker Engine
+    ansible.builtin.apt:
+      update_cache: true
+      name:
+        - docker-ce
+    become: true
+    become_method: sudo
+    when: docker_check is failed
+
+  - name: Restart docker.service
+    systemd: 
+      name: docker
+      daemon_reload: yes
+      state: started
+    become: true 
+    become_method: sudo 
+    when: docker_check is failed
+
+  - name: Update apt cache
+    apt:
+      update_cache: yes
+    become: true 
+    become_method: sudo
+
+  - name: Install containerd.io
+    apt:
+      name: containerd.io
+      state: present
+    become: true 
+    become_method: sudo
+
+  - name: Configure containerd to start using systemd as cgroup
+    ansible.builtin.shell:
+      cmd: "{{ item }}"
+    with_items:
+      - "containerd config default | sudo tee /etc/containerd/config.toml >/dev/null 2>&1"
+      - "sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml"
+
+  - name: Restart containerd service
+    ansible.builtin.systemd:
+      name: containerd
+      state: restarted
+    become: true 
+    become_method: sudo
+    
+  - name: Enable containerd service
+    ansible.builtin.systemd:
+      name: containerd
+      enabled: yes
+    become: true 
+    become_method: sudo
