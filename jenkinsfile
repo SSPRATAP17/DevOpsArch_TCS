@@ -1,0 +1,101 @@
+pipeline {
+  agent none
+  stages{
+    stage ('Job1: Install and Confiure Puppet Agent Installation') {
+      agent {
+         label 'slave'
+        }
+      steps {
+        sh '''wget https://apt.puppetlabs.com/puppet6-release-focal.deb
+              sudo dpkg -i puppet6-release-focal.deb
+              sudo apt-get update -y
+              sudo apt-get install puppet-agent -y'''
+        }
+    }
+   stage ('Job2: Docker installation using Ansible playbook'){
+     agent any
+     steps{
+        git 'https://github.com/SSPRATAP17/DevOpsArch_TCS.git'
+        dir('.') {
+          sh ' sudo ansible-playbook playbook.yaml -i inventory'
+        }
+    }       
+   }
+   stage("Job3: Building image and running container"){
+    agent any 
+    steps{
+        git 'https://github.com/SSPRATAP17/DevOpsArch_TCS.git'
+        //script {
+        //    error ( ' Intentional failure')
+        //}
+        sshPublisher(publishers: [sshPublisherDesc(configName: 'Test Server', transfers: [
+            sshTransfer(
+                cleanRemote: false, 
+                excludes: '', 
+                execCommand: '''
+                    docker container stop proj_app
+                    docker container rm -f proj_app
+                    docker image rmi -f proj_app
+                    cd /home/ubuntu/docker
+                    docker image build -t proj_app .
+                ''',
+                execTimeout: 120000, 
+                flatten: false, 
+                makeEmptyDirs: false, 
+                noDefaultExcludes: false, 
+                patternSeparator: '[, ]+', 
+                remoteDirectory: '/docker', 
+                remoteDirectorySDF: false, 
+                removePrefix: '', 
+                sourceFiles: '**/*'
+            ),
+            sshTransfer(
+                cleanRemote: false, 
+                excludes: '', 
+                execCommand: 'docker container run -dit --name proj_app -p 80:80 proj_app', 
+                execTimeout: 120000, 
+                flatten: false, 
+                makeEmptyDirs: false, 
+                noDefaultExcludes: false, 
+                patternSeparator: '[, ]+', 
+                remoteDirectory: '', 
+                remoteDirectorySDF: false, 
+                removePrefix: '', 
+                
+                sourceFiles: ''
+            )
+        ], usePromotionTimestamp: false, useWorkspaceInPromotion: false, verbose: false)])
+    }
+   }
+    stage("Job4: Delete Container if it fails"){
+        agent any
+        when {
+            expression {
+                currentBuild.result == 'FAILURE' ||
+                currentBuild.result == 'UNSTABLE'
+            }
+        }
+        steps{
+            sshPublisher(publishers: [sshPublisherDesc(configName: 'Test Server', transfers: [
+            sshTransfer(
+                cleanRemote: false, 
+                excludes: '', 
+                execCommand: '''
+                    docker container stop proj_app
+                    docker container rm -f proj_app
+                ''', 
+                execTimeout: 120000, 
+                flatten: false, 
+                makeEmptyDirs: false, 
+                noDefaultExcludes: false, 
+                patternSeparator: '[, ]+', 
+                remoteDirectory: '', 
+                remoteDirectorySDF: false, 
+                removePrefix: '', 
+                sourceFiles: ''
+            )
+        ], usePromotionTimestamp: false, useWorkspaceInPromotion: false, verbose: false)])
+        }
+    }
+}
+}
